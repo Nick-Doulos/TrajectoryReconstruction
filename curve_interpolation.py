@@ -4,28 +4,28 @@ import pyproj
 
 
 class CurveInterpolator:
-    def __init__(self, threshold=0.5, granularity=5):
+    def __init__(self, threshold=0.5, NrPoints=5):
         self.threshold = threshold  # Bearing change threshold to detect curves
-        self.granularity = granularity  # Number of points to interpolate
+        self.NrPoints = NrPoints   # Number of points to interpolate
 
     def __call__(self, df):
         """
-            Detect curves in a path defined by latitude and longitude points in a DataFrame,
-            and interpolate additional points on these curves.
+        Detect curves in a path defined by latitude and longitude points in a DataFrame,
+        and interpolate additional points on these curves.
 
-            This function identifies points where the change in bearing exceeds a specified threshold,
-            indicating a curve. It then interpolates additional points along these curves to provide
-            a more detailed path representation. The function also linearly interpolates time between
-            points.
+        This function identifies points where the change in bearing exceeds a specified threshold,
+        indicating a curve. It then interpolates additional points along these curves to provide
+        a more detailed path representation. The function also linearly interpolates time between
+        points.
 
-            Parameters:
-            df (DataFrame): DataFrame containing 'Time', 'lat', and 'lon' columns.
-            threshold (float, optional): Bearing change threshold to detect curves. Defaults to 0.5.
-            granularity (int, optional): Number of points to interpolate on each curve. Defaults to 5.
+        Parameters:
+        df (DataFrame): DataFrame containing 'Time', 'lat', and 'lon' columns.
+        threshold (float, optional): Bearing change threshold to detect curves. Defaults to 0.5.
+        NrPoints (int, optional): Number of points to interpolate on each curve. Defaults to 5.
 
-            Returns:
-            DataFrame: A new DataFrame with interpolated points along detected curves.
-            """
+        Returns:
+        DataFrame: The original DataFrame with interpolated points added along detected curves.
+        """
         # Convert time column to datetime objects
         df['Time'] = pd.to_datetime(df['Time'], format='%Y-%m-%d %H:%M:%S')
 
@@ -50,29 +50,30 @@ class CurveInterpolator:
             for idx, row in curve_points.iterrows():
                 if idx < df.index.max():
                     next_idx = idx + 1
-                    # Interpolate geographic coordinates
-                    inter_points = geodesic_interpolate(df.at[idx, 'lat'], df.at[idx, 'lon'],
-                                                        df.at[next_idx, 'lat'], df.at[next_idx, 'lon'],
-                                                        self.granularity)
+                    if next_idx in df.index:
+                        # Interpolate geographic coordinates
+                        inter_points = geodesic_interpolate(df.at[idx, 'lat'], df.at[idx, 'lon'],
+                                                            df.at[next_idx, 'lat'], df.at[next_idx, 'lon'],
+                                                            self.NrPoints)
 
-                    # Linearly interpolate time
-                    time1 = df.at[idx, 'Time'].timestamp()
-                    time2 = df.at[next_idx, 'Time'].timestamp()
-                    time_interp = np.linspace(time1, time2, num=self.granularity)
-                    new_times = pd.to_datetime(time_interp, unit='s')
+                        # Linearly interpolate time
+                        time1 = df.at[idx, 'Time'].timestamp()
+                        time2 = df.at[next_idx, 'Time'].timestamp()
+                        time_interp = np.linspace(time1, time2, num=self.NrPoints)
+                        new_times = pd.to_datetime(time_interp, unit='s')
 
-                    # Compile interpolated latitude, longitude, and time points
-                    for inter_lat, inter_lon, new_time in zip([p[0] for p in inter_points],
-                                                              [p[1] for p in inter_points],
-                                                              new_times):
-                        interpolated_points.append((inter_lat, inter_lon, new_time))
+                        # Compile interpolated latitude, longitude, and time points
+                        for inter_lat, inter_lon, new_time in zip([p[0] for p in inter_points],
+                                                                  [p[1] for p in inter_points],
+                                                                  new_times):
+                            interpolated_points.append((inter_lat, inter_lon, new_time))
 
-            # Create a new DataFrame with the interpolated points if any were added
+            # Append interpolated points to the original DataFrame
             if interpolated_points:
-                new_df = pd.DataFrame(interpolated_points, columns=['lat', 'lon', 'Time'])
-                new_df = new_df.drop_duplicates(subset=['lat', 'lon'])
-                new_df = new_df.reset_index(drop=True)
-                return new_df
+                new_points_df = pd.DataFrame(interpolated_points, columns=['lat', 'lon', 'Time'])
+                df = pd.concat([df, new_points_df]).drop_duplicates(subset=['lat', 'lon', 'Time']).sort_values(
+                    by='Time').reset_index(drop=True)
+                return df
             else:
                 return df
         else:
@@ -116,31 +117,7 @@ def calculate_initial_compass_bearing(points, lat2, lon2):
     return initial_bearing
 
 
-def calculate_bearing(start_lat, start_lon, end_lat, end_lon):
-    """
-    Calculate the bearing from a start point to an end point using the pyproj library.
-
-    This function uses the pyproj library, which provides an interface to PROJ (cartographic
-    projections and coordinate transformations library). The calculation is based on the WGS84
-    ellipsoid model of the Earth.
-
-    Parameters:
-    start_lat (float): Latitude of the start point.
-    start_lon (float): Longitude of the start point.
-    end_lat (float): Latitude of the end point.
-    end_lon (float): Longitude of the end point.
-
-    Returns:
-    float: Forward azimuth, representing the bearing from the start point to the end point.
-    """
-    # Initialize the Geod object with WGS84 ellipsoid model
-    geod = pyproj.Geod(ellps='WGS84')
-    # Calculate forward azimuth (bearing), back azimuth, and distance between the two points
-    fwd_azimuth, _, _ = geod.inv(start_lon, start_lat, end_lon, end_lat)
-    return fwd_azimuth
-
-
-def geodesic_interpolate(start_lat, start_lon, end_lat, end_lon, granularity):
+def geodesic_interpolate(start_lat, start_lon, end_lat, end_lon, NrPoints):
     """
     Interpolate a number of points between two geographic coordinates on the Earth's surface.
 
@@ -153,14 +130,14 @@ def geodesic_interpolate(start_lat, start_lon, end_lat, end_lon, granularity):
     start_lon (float): Longitude of the start point.
     end_lat (float): Latitude of the end point.
     end_lon (float): Longitude of the end point.
-    granularity (int): Number of intermediate points to generate.
+    NrPoints (int): Number of intermediate points to generate.
 
     Returns:
     list of tuples: A list of tuples (latitude, longitude) representing the interpolated points.
     """
     geod = pyproj.Geod(ellps='WGS84')
     # Generate intermediate points between the start and end points
-    line = geod.npts(start_lon, start_lat, end_lon, end_lat, granularity - 1)
+    line = geod.npts(start_lon, start_lat, end_lon, end_lat, NrPoints - 1)
     interpolated_points = [(start_lat, start_lon)]  # Start with the initial point
 
     # Add the generated intermediate points, adjusting the order to (latitude, longitude)

@@ -12,22 +12,23 @@ class TrajectoryRefiner:
 
     def __call__(self, matched):
         """
-            Refines a trajectory of GPS points based on the road network graph G, addressing sharp turns and edge transitions.
+        Refines a trajectory of GPS points based on the road network graph G, addressing sharp turns and edge
+        transitions.
 
-            This function iterates through a series of geographic points, refining the trajectory by accounting for sharp
-            changes in direction and differences in the underlying road network's OSM IDs. It uses a vectorized approach for
-            efficiency and includes corner interpolation when transitioning between different road segments.
+        This function iterates through a series of geographic points, refining the trajectory by accounting for sharp
+        changes in direction and differences in the underlying road network's OSM IDs. It uses a vectorized approach for
+        efficiency and includes corner interpolation when transitioning between different road segments.
 
-            Args:
-            matched (DataFrame): Contains 'lon' and 'lat' columns with longitude and latitude coordinates of the trajectory.
+        Args:
+        matched (DataFrame): Contains 'lon' and 'lat' columns with longitude and latitude coordinates of the trajectory.
 
-            Returns:
-            DataFrame: Refined trajectory as a DataFrame with 'lat' and 'lon' columns.
-            """
+        Returns:
+        DataFrame: Refined trajectory as a DataFrame with 'lat' and 'lon' columns.
+        """
         points = [Point(lon, lat) for lon, lat in zip(matched['lon'], matched['lat'])]
         lons, lats = zip(*[(point.x, point.y) for point in points])
         west, east, south, north = min(lons), max(lons), min(lats), max(lats)
-        G = ox.graph_from_bbox(north, south, east, west, network_type='drive', simplify=False)
+        G = ox.graph_from_bbox(bbox=(north, south, east, west), network_type='drive', simplify=False)
 
         matched['Time'] = pd.to_datetime(matched['Time'])  # Convert to datetime objects
         matched['Timestamp'] = matched['Time'].apply(lambda x: x.timestamp())  # Convert to Unix timestamp
